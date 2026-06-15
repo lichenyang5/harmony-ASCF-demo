@@ -1,30 +1,47 @@
+import { DiscoverViewModel } from '../viewmodel/DiscoverViewModel';
+import { DiscoverController } from '../controller/DiscoverController';
+import { AscfFeature } from '../model/AscfFeature';
+
 /**
- * 发现 Tab：纯展示，列出 ASCF 的几个特点，帮助「了解 ASCF」。
+ * 发现 Tab（UI 层）。
+ * 只持有 ViewModel + Controller，进页面时让 controller 拉数据；
+ * build 里读 vm 的 @Trace 字段做三态渲染。数据怎么来的 UI 不关心
+ * —— 全链路：UI → Controller → Biz → Imp → Http（Model 回流）。
  */
 @ComponentV2
 export struct DiscoverTab {
-  private readonly points: string[] = [
-    '免安装：服务中心直接流转，无需下载安装包',
-    '一次开发：复用小程序资产，少量适配即可上架',
-    'ASCF Toolkit：hvigor 插件把工程自动编译成元服务',
-    'ascfapi：元服务运行时能力（如增强 Web 组件）'
-  ];
+  @Local vm: DiscoverViewModel = new DiscoverViewModel();
+  private controller: DiscoverController = new DiscoverController(this.vm);
+
+  aboutToAppear(): void {
+    this.controller.loadFeatures();
+  }
 
   build() {
     Column({ space: 12 }) {
       Text('🧭 发现 · ASCF 是什么')
         .fontSize(22).fontWeight(FontWeight.Bold).fontColor('#1A1A1A')
         .margin({ bottom: 8 })
-      ForEach(this.points, (p: string) => {
-        Row({ space: 8 }) {
-          Text('•').fontSize(15).fontColor('#0A59F7')
-          Text(p).fontSize(13).fontColor('#3C4043').layoutWeight(1)
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor('#FFFFFF')
-        .borderRadius(10)
-      }, (p: string) => p)
+
+      if (this.vm.loading) {
+        LoadingProgress().width(36).height(36).color('#0A59F7')
+      } else if (this.vm.error.length > 0) {
+        Text(this.vm.error).fontSize(13).fontColor('#9AA0A6')
+      } else {
+        ForEach(this.vm.features, (item: AscfFeature) => {
+          Column({ space: 4 }) {
+            Text(item.title)
+              .fontSize(15).fontWeight(FontWeight.Medium).fontColor('#0A59F7')
+            Text(item.desc)
+              .fontSize(13).fontColor('#3C4043')
+          }
+          .alignItems(HorizontalAlign.Start)
+          .width('100%')
+          .padding(12)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(10)
+        }, (item: AscfFeature) => item.id)
+      }
     }
     .width('100%').height('100%')
     .padding(20)
