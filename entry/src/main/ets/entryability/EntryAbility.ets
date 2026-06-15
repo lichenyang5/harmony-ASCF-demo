@@ -1,11 +1,15 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { HMRouterMgr } from '@hadss/hmrouter';
 
 const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    // HMRouter 初始化：必须早于 loadContent，放在 onCreate 最稳妥
+    HMRouterMgr.openLog('INFO');
+    HMRouterMgr.init({ context: this.context });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
   }
 

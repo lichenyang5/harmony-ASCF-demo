@@ -1,63 +1,22 @@
-import { authentication } from '@kit.AccountKit';
-import { BusinessError } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
+import { HMNavigation } from '@hadss/hmrouter';
 
-const DOMAIN = 0x0000;
-
+/**
+ * 应用入口页（@Entry）：被 EntryAbility.loadContent('pages/Index') 加载。
+ * 它只做一件事——挂上 HMRouter 的导航宿主 HMNavigation，首页指向 pages/Main
+ * （底部 Tab 分栏）。之后所有页面切换都走 HMRouter，不再用系统 router。
+ */
 @Entry
-@Component
-struct Index {
-  @State message: string = 'Hello World';
-
+@ComponentV2
+export struct Index {
   build() {
-    RelativeContainer() {
-      Text(this.message)
-        .id('HelloWorld')
-        .fontSize($r('app.float.page_text_font_size'))
-        .fontWeight(FontWeight.Bold)
-        .alignRules({
-          center: { anchor: '__container__', align: VerticalAlign.Center },
-          middle: { anchor: '__container__', align: HorizontalAlign.Center }
-        })
-        .onClick(() => {
-          this.message = 'Welcome';
-        })
+    Stack({ alignContent: Alignment.TopStart }) {
+      HMNavigation({
+        navigationId: 'MainNavigation',
+        homePageUrl: 'pages/Main',
+        options: {}
+      })
     }
-    .height('100%')
     .width('100%')
-  }
-
-  aboutToAppear() {
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
-    this.loginWithHuaweiID();
-  }
-
-  /**
-   * Sample code for using HUAWEI ID to log in to atomic service.
-   * According to the Atomic Service Review Guide, when a atomic service has an account system,
-   * the option to log in with a HUAWEI ID must be provided.
-   * The following presets the atomic service to use the HUAWEI ID silent login function.
-   * To enable the atomic service to log in successfully using the HUAWEI ID, please refer
-   * to the HarmonyOS HUAWEI ID Access Guide to configure the client ID and fingerprint certificate.
-   */
-  private loginWithHuaweiID() {
-    // Create a login request and set parameters
-    const loginRequest = new authentication.HuaweiIDProvider().createLoginWithHuaweiIDRequest();
-    // Whether to forcibly launch the HUAWEI ID login page when the user is not logged in with the HUAWEI ID
-    loginRequest.forceLogin = false;
-    // Execute login request
-    const controller = new authentication.AuthenticationController();
-    controller.executeRequest(loginRequest).then((data) => {
-      const loginWithHuaweiIDResponse = data as authentication.LoginWithHuaweiIDResponse;
-      const authCode = loginWithHuaweiIDResponse.data?.authorizationCode;
-      // Send authCode to the backend in exchange for unionID, session
-
-    }).catch((error: BusinessError) => {
-      hilog.error(DOMAIN, 'testTag', 'error: %{public}s', JSON.stringify(error));
-      if (error.code === authentication.AuthenticationErrorCode.ACCOUNT_NOT_LOGGED_IN) {
-        // HUAWEI ID is not logged in, it is recommended to jump to the login guide page
-
-      }
-    });
+    .height('100%')
   }
 }
