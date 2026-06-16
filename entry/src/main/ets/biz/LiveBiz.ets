@@ -1,6 +1,6 @@
 import { BaseBiz } from './BaseBiz';
 import { LiveImp } from '../imp/LiveImp';
-import { WsClient, WsHandlers } from '../http/WsClient';
+import { WsClient, WsHandlers } from 'common';
 import { WsEvent } from '../model/WsEvent';
 import { BusinessError } from '@kit.BasicServicesKit';
 

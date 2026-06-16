@@ -1,6 +1,6 @@
 import { pasteboard } from '@kit.BasicServicesKit'
 import { UIContext } from '@kit.ArkUI'
-import { getNetMonitor, NetFrame, NetMonitorState, NetRecord } from './NetMonitor'
+import { getNetMonitor, NetFrame, NetMonitorState, NetRecord } from 'common'
 
 // ── 内联配色（对齐 demo 其余页面，不依赖 ThemeState）──
 const C_PRIMARY: string = '#0A59F7'

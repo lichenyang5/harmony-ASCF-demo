@@ -1,6 +1,6 @@
 import { BaseBiz } from './BaseBiz';
 import { TodoImp } from '../imp/TodoImp';
-import { ApiResponse } from '../model/ApiResponse';
+import { ApiResponse } from 'common';
 import { Todo } from '../model/Todo';
 
 /**

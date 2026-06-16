@@ -1,6 +1,4 @@
-import { HttpUtil } from '../http/HttpUtil';
-import { WsClient, WsHandlers } from '../http/WsClient';
-import { ApiConstants } from '../http/ApiConstants';
+import { HttpUtil, WsClient, WsHandlers, ApiConstants } from 'common';
 
 /**
  * 实时通道「实现层」(Imp)：通过 HttpUtil.webSocket 建连，

@@ -1,6 +1,4 @@
-import { HttpUtil } from '../http/HttpUtil';
-import { ApiConstants } from '../http/ApiConstants';
-import { ApiResponse } from '../model/ApiResponse';
+import { HttpUtil, ApiConstants, ApiResponse } from 'common';
 import { Todo } from '../model/Todo';
 
 /**

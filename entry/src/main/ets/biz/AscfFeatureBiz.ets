@@ -1,6 +1,6 @@
 import { BaseBiz } from './BaseBiz';
 import { AscfFeatureImp } from '../imp/AscfFeatureImp';
-import { ApiResponse } from '../model/ApiResponse';
+import { ApiResponse } from 'common';
 import { AscfFeature } from '../model/AscfFeature';
 
 /**
