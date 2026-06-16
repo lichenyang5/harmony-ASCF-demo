@@ -7,7 +7,7 @@ import { getLoadLog, LoadLog } from '../lazydemo/LoadLog';
  * 「动态加载 vs 延迟加载」实验卡片。
  *
  * 看点：冷启动时下面日志是空的——说明 library HSP / LazyFeature 两个模块都没被加载。
- * - 点「动态加载」→ 运行到 import('library') 才去拉起 HSP 动态共享包（异步，返回 Promise）；
+ * - 点「动态加载」→ 首次 import('library') 拉起 HSP 并缓存，之后点只复用、不再 import（异步，返回 Promise）；
  *   HSP 是独立分包，拿不到 entry 的 LoadLog 单例，所以由 entry 在 import 前后打印；
  * - 点「延迟加载」→ 首次调用 runLazy() 才执行 LazyFeature 顶层（同步，模块内部直接写 LoadLog）；
  * - 模块都只加载一次，再点只执行函数（动态侧看返回的「加载时刻」不变即可印证）。
@@ -15,12 +15,20 @@ import { getLoadLog, LoadLog } from '../lazydemo/LoadLog';
 @ComponentV2
 export struct LazyLoadCard {
   private loadLog: LoadLog = getLoadLog();
+  /** 缓存首次 import('library') 的结果，之后复用、不再 import */
+  private libNs: ESObject | null = null;
 
-  /** 动态加载：import('library') 按需拉起 HSP 动态共享包（异步，返回 Promise） */
+  /** 动态加载：首次 import('library') 拉起 HSP 并缓存，之后只复用 + 调方法 */
   async loadDynamic(): Promise<void> {
     try {
-      this.loadLog.add('⏳ 调用 import("library") —— 动态拉起 HSP 分包');
-      const ns: ESObject = await import('library');
+      if (this.libNs === null) {
+        this.loadLog.add('⏳ 首次：import("library") 拉起 HSP 分包并缓存');
+        this.libNs = await import('library');
+        this.loadLog.add('🟦 library HSP 已加载并缓存');
+      } else {
+        this.loadLog.add('♻ 已缓存，直接复用，不再 import');
+      }
+      const ns: ESObject = this.libNs as ESObject;
       const msg: string = ns.runDynamic() as string;
       this.loadLog.add('▶ ' + msg);
     } catch (e) {
