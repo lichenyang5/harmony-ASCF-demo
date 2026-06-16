@@ -2,6 +2,7 @@ import { HMRouter } from '@hadss/hmrouter';
 import { RouterConstants } from '../constants/RouterConstants';
 import { HomeTab } from '../components/HomeTab';
 import { DiscoverTab } from '../components/DiscoverTab';
+import { TodoTab } from '../components/TodoTab';
 import { MineTab } from '../components/MineTab';
 
 interface TabItem {
@@ -24,6 +25,7 @@ export struct MainPage {
   private readonly tabs: TabItem[] = [
     { label: '首页', icon: '🏠' },
     { label: '发现', icon: '🧭' },
+    { label: '待办', icon: '✅' },
     { label: '我的', icon: '👤' }
   ];
 
@@ -33,6 +35,7 @@ export struct MainPage {
       Tabs({ index: this.currentIndex }) {
         TabContent() { HomeTab() }
         TabContent() { DiscoverTab() }
+        TabContent() { TodoTab() }
         TabContent() { MineTab() }
       }
       .barHeight(0)        // 隐藏系统自带 TabBar，改用下面自绘底栏
