@@ -10,7 +10,9 @@ import { AscfFeature } from '../model/AscfFeature';
  * 改成 false 就真正打 HttpUtil.get(ASCF_FEATURES)。
  */
 export class AscfFeatureImp {
-  private static readonly USE_MOCK: boolean = true;
+  // 改成 false 走真后端 GET /api/ascf/features —— 进「发现」Tab 即发起，
+  // 这次请求会出现在网络调试面板里。后端没起时由 Controller 兜底显示「加载失败」。
+  private static readonly USE_MOCK: boolean = false;
 
   list(): Promise<ApiResponse<AscfFeature[]>> {
     if (AscfFeatureImp.USE_MOCK) {

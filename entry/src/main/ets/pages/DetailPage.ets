@@ -1,6 +1,5 @@
 import { HMRouter, HMRouterMgr } from '@hadss/hmrouter';
 import { RouterConstants } from '../constants/RouterConstants';
-
 /**
  * 详情页：用 @HMRouter 注册为可跳转目标。
  * - 进入：上一页 HMRouterMgr.push({ pageUrl: PAGE_DETAIL })
