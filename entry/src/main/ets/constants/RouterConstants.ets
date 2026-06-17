@@ -14,4 +14,7 @@ export class RouterConstants {
 
   /** 详情页：从 Tab 内 push 进入，演示路由跳转与返回 */
   static readonly PAGE_DETAIL: string = 'pages/Detail'
+
+  /** Web 容器页：演示 ArkWeb 嵌入本地 H5 + JSBridge 双向通信 */
+  static readonly PAGE_WEB_RUNTIME: string = 'pages/WebRuntime'
 }
