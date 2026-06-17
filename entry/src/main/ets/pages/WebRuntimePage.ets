@@ -143,6 +143,13 @@ export struct WebRuntimePage {
                       .fontColor('#3C4043')
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    if (e.responseJson.length > 0) {
+                      Text('↩ ' + e.responseJson)
+                        .fontSize(11)
+                        .fontColor('#0A59F7')
+                        .maxLines(2)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    }
                   }
                   .layoutWeight(1)
                   .alignItems(HorizontalAlign.Start)
