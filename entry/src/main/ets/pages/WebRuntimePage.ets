@@ -5,29 +5,54 @@ import { WebBridgeChannel } from '../bridge/WebBridgeChannel';
 import { BridgeLog, BridgeLogEntry, getBridgeLog } from '../bridge/BridgeLog';
 
 /**
- * Web 容器页（提交 1→3）：用标准 Web 组件加载本地 H5，并跑通「H5 → ArkTS」。
+ * Web 容器页（提交 1→5）：标准 Web 加载本地 H5，跑通完整闭环
+ * H5 → ArkTS → 模拟底座能力 → ArkTS → H5，并补 Web 容器基本治理。
  *
- * 桥的注册：通过 .javaScriptProxy 把 WebBridgeChannel 注入成 H5 的 window.ascfBridge，
- * H5 调 window.ascfBridge.send(jsonStr) → ArkTS 的 WebBridgeChannel.send 收到、记到 BridgeLog。
- * 本步只到「收到 + 记日志」；分发到能力（提交4）、回调 H5（提交5）后续接入。
+ * - 桥：javaScriptProxy 注入 window.ascfBridge；ArkTS 处理完用 controller.runJavaScript 回传 H5。
+ * - 真实副作用：openToast 用页面 UIContext 弹鸿蒙 Toast（aboutToAppear 里绑给 channel）。
+ * - 治理：加载进度/标题/资源错误/HTTP 错误/简单白名单拦截。
  */
 @HMRouter({ pageUrl: RouterConstants.PAGE_WEB_RUNTIME })
 @ComponentV2
 export struct WebRuntimePage {
   private controller: webview.WebviewController = new webview.WebviewController();
-  /** 注册给 H5 的桥接通道对象（window.ascfBridge） */
-  private bridge: WebBridgeChannel = new WebBridgeChannel();
-  /** 桥接日志（单例，UI 读它显示收到的请求） */
+  private bridge: WebBridgeChannel = new WebBridgeChannel(this.controller);
   private bridgeLog: BridgeLog = getBridgeLog();
+  /** 白名单：只放行这些 http(s) 前缀，其余远程地址拦截 */
+  private readonly allowList: string[] = ['https://developer.huawei.com'];
 
   @Local progress: number = 0;
   @Local title: string = 'Web 容器';
   @Local loadState: string = '未开始';
   @Local errorMsg: string = '';
+  /** 容器治理事件（HTTP 错误 / 白名单拦截） */
+  @Local guardMsg: string = '';
+
+  aboutToAppear(): void {
+    // 把「弹真实 Toast」的能力绑给桥（用页面的 UIContext，在点按钮时才真正取）
+    this.bridge.bindToast((msg: string) => {
+      this.getUIContext().getPromptAction().showToast({ message: 'Toast: ' + msg, duration: 2000 });
+    });
+  }
+
+  /** 简单白名单拦截：非 http(s) 一律放行（本地资源等），http(s) 只放行白名单，其余拦截 */
+  private shouldIntercept(url: string): boolean {
+    const isHttp = url.startsWith('http://') || url.startsWith('https://');
+    if (!isHttp) {
+      return false;
+    }
+    for (const a of this.allowList) {
+      if (url.startsWith(a)) {
+        return false;
+      }
+    }
+    this.guardMsg = '已拦截非白名单地址：' + url;
+    return true;
+  }
 
   build() {
     Column() {
-      // ── 顶栏：返回 + 标题 + 状态 ──
+      // ── 顶栏 ──
       Row({ space: 10 }) {
         Text('← 返回')
           .fontSize(14)
@@ -63,6 +88,16 @@ export struct WebRuntimePage {
           .padding({ left: 14, right: 14, top: 4, bottom: 4 })
       }
 
+      if (this.guardMsg.length > 0) {
+        Text('🛡 ' + this.guardMsg)
+          .fontSize(12)
+          .fontColor('#FF9500')
+          .width('100%')
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .padding({ left: 14, right: 14, top: 4, bottom: 4 })
+      }
+
       // ── Web 区域 ──
       Web({ src: $rawfile('ascf_bridge_demo.html'), controller: this.controller })
         .javaScriptAccess(true)
@@ -76,6 +111,7 @@ export struct WebRuntimePage {
         .onPageBegin(() => {
           this.loadState = '加载中';
           this.errorMsg = '';
+          this.guardMsg = '';
         })
         .onProgressChange((event) => {
           this.progress = event.newProgress;
@@ -90,19 +126,24 @@ export struct WebRuntimePage {
           this.progress = 100;
         })
         .onErrorReceive((event) => {
-          // 只认主文档错误，忽略 favicon 等子资源 404
           if (event.request.isMainFrame()) {
             this.loadState = '出错';
             this.errorMsg = event.error.getErrorInfo();
           }
         })
+        .onHttpErrorReceive((event) => {
+          this.guardMsg = 'HTTP 错误 ' + event.response.getResponseCode().toString();
+        })
+        .onLoadIntercept((event) => {
+          return this.shouldIntercept(event.data.getRequestUrl());
+        })
         .width('100%')
         .layoutWeight(1)
 
-      // ── 桥接日志面板：ArkTS 收到的请求（action / id / params）──
+      // ── 桥接日志面板：ArkTS 收到的请求 + 回出的响应 ──
       Column({ space: 6 }) {
         Row() {
-          Text('桥接日志 · ArkTS 收到 (' + this.bridgeLog.entries.length.toString() + ')')
+          Text('桥接日志 · ArkTS (' + this.bridgeLog.entries.length.toString() + ')')
             .fontSize(13)
             .fontWeight(FontWeight.Medium)
             .fontColor('#3C4043')
@@ -117,7 +158,7 @@ export struct WebRuntimePage {
         .width('100%')
 
         if (this.bridgeLog.entries.length === 0) {
-          Text('点 H5 里的按钮，ArkTS 收到的请求会出现在这里')
+          Text('点 H5 里的按钮，完整链路会出现在这里和 H5 日志里')
             .fontSize(12)
             .fontColor('#9AA0A6')
             .width('100%')

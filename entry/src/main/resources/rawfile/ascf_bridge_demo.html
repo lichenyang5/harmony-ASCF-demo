@@ -22,11 +22,14 @@
       font-size: 15px; color: #fff; background: #0a59f7; border: none;
       border-radius: 10px; padding: 12px; width: 100%;
     }
+    button.ghost { background: #fff; color: #ff9500; border: 1px solid #ffd591; }
     button:active { opacity: 0.8; }
     .loghead { font-size: 13px; font-weight: 600; color: #3c4043; margin-bottom: 8px; }
+    .result { background: #f5f6f7; border-radius: 8px; padding: 10px; }
+    .result pre { font-size: 12px; color: #0a59f7; white-space: pre-wrap; word-break: break-all; }
     .log {
       font-size: 12px; color: #3c4043; line-height: 1.7;
-      max-height: 180px; overflow-y: auto; word-break: break-all;
+      max-height: 160px; overflow-y: auto; word-break: break-all;
     }
     .log div { padding: 4px 0; border-top: 1px solid #f0f0f0; }
     .empty { font-size: 12px; color: #9aa0a6; }
@@ -35,16 +38,22 @@
 <body>
   <div class="card">
     <h1>🌐 ASCF Bridge Demo</h1>
-    <p class="sub">点按钮，H5 会按 <b>BridgeRequest</b> 格式（id / action / params）把请求发给 ArkTS。本步只跑通「H5 → ArkTS」这半条链路，返回结果在后续步骤接入。</p>
+    <p class="sub">点按钮跑通完整闭环：<b>H5 → ArkTS → 模拟底座能力 → ArkTS → H5</b>。结果会回到下面「最近结果」。</p>
     <div class="btns">
       <button onclick="callNative('getDeviceInfo')">获取设备信息</button>
       <button onclick="callNative('getCurrentTime')">获取当前时间</button>
-      <button onclick="callNative('openToast', { message: 'Hello from H5 👋' })">弹 Toast</button>
+      <button onclick="callNative('openToast', { message: 'Hello from H5 👋' })">弹 Toast（鸿蒙原生）</button>
+      <button class="ghost" onclick="tryExternal()">尝试打开外部链接（会被白名单拦截）</button>
     </div>
   </div>
 
   <div class="card">
-    <div class="loghead">H5 侧日志</div>
+    <div class="loghead">最近结果（ArkTS 回传）</div>
+    <div id="result" class="result"><span class="empty">还没有结果</span></div>
+  </div>
+
+  <div class="card">
+    <div class="loghead">完整链路日志（H5 侧）</div>
     <div id="log" class="log"><span class="empty">点上面的按钮试试……</span></div>
   </div>
 
@@ -53,18 +62,45 @@
     function log(s) {
       var el = document.getElementById('log');
       var t = new Date().toLocaleTimeString();
-      el.innerHTML = '<div>[' + t + '] ' + s + '</div>' + (seq <= 1 ? '' : el.innerHTML);
+      var prev = (el.querySelector('.empty')) ? '' : el.innerHTML;
+      el.innerHTML = '<div>[' + t + '] ' + s + '</div>' + prev;
     }
+    function tail4(id) { return id ? id.slice(-4) : '????'; }
+
     function callNative(action, params) {
       seq++;
       var req = { id: 'req_' + Date.now() + '_' + seq, action: action, params: params || {} };
-      // window.ascfBridge 由 ArkTS 通过 javaScriptProxy 注入
       if (window.ascfBridge && window.ascfBridge.send) {
         window.ascfBridge.send(JSON.stringify(req));
-        log('→ 发出 <b>' + action + '</b>：' + JSON.stringify(req));
+        log('① H5 发出 <b>' + action + '</b> · id …' + tail4(req.id));
       } else {
         log('⚠ ascfBridge 未注入（请在鸿蒙容器里打开本页）');
       }
+    }
+
+    function tryExternal() {
+      log('① H5 尝试跳转 https://example.com（应被容器白名单拦截）');
+      window.location.href = 'https://example.com/should-be-blocked';
+    }
+
+    // ArkTS 处理完，通过 runJavaScript 调这个全局函数，把 BridgeResponse 送回 H5
+    window.__ascfOnResponse = function (jsonStr) {
+      try {
+        var resp = JSON.parse(jsonStr);
+        var ok = resp.code === 0;
+        log('④ H5 收到结果 · id …' + tail4(resp.id) + ' · ' + (ok ? '成功' : ('失败 ' + resp.code)));
+        showResult(resp);
+      } catch (e) {
+        log('④ H5 收到非法响应');
+      }
+    };
+
+    function showResult(resp) {
+      var el = document.getElementById('result');
+      var body = (resp.code === 0)
+        ? JSON.stringify(resp.data || {}, null, 2)
+        : ('[' + resp.code + '] ' + resp.message);
+      el.innerHTML = '<pre>' + body + '</pre>';
     }
   </script>
 </body>

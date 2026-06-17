@@ -16,12 +16,9 @@ export class NativeAbilityBiz {
     return this.imp.readCurrentTime();
   }
 
-  /** Toast 是「效果」类能力，真实弹出需要页面 UIContext（提交 5 接入）；本步先回执 */
+  /** Toast 的「数据」部分（回执 message）；真实弹出由 WebBridgeChannel 用页面 UIContext 完成 */
   openToast(message: string): Record<string, string> {
-    const info: Record<string, string> = {
-      'message': message,
-      'shown': 'mock（提交5接入真实Toast）'
-    };
+    const info: Record<string, string> = { 'message': message };
     return info;
   }
 }
