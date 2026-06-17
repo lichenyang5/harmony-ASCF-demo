@@ -1,28 +1,28 @@
 import { HMRouter, HMRouterMgr } from '@hadss/hmrouter';
 import { RouterConstants } from '../constants/RouterConstants';
 import { webview } from '@kit.ArkWeb';
+import { WebBridgeChannel } from '../bridge/WebBridgeChannel';
+import { BridgeLog, BridgeLogEntry, getBridgeLog } from '../bridge/BridgeLog';
 
 /**
- * Web 容器页（提交 1）：用 ArkUI 内置 Web 组件加载本地 H5。
+ * Web 容器页（提交 1→3）：用标准 Web 组件加载本地 H5，并跑通「H5 → ArkTS」。
  *
- * 目标——先确认「鸿蒙页面能嵌入 Web 页面」，并把容器最基础的几样治理露出来：
- * 加载进度（onProgressChange）/ 文档标题（onTitleReceive）/ 基础错误状态（onErrorReceive）。
- * JSBridge 双向通信在后续提交接入。
- *
- * 选型说明：用标准 Web + webview.WebviewController，是因为它带 javaScriptProxy/runJavaScript
- * 这套官方双向桥原语；AtomicServiceEnhancedWeb 长于容器治理但不暴露这两个原语，留博客里对比。
+ * 桥的注册：通过 .javaScriptProxy 把 WebBridgeChannel 注入成 H5 的 window.ascfBridge，
+ * H5 调 window.ascfBridge.send(jsonStr) → ArkTS 的 WebBridgeChannel.send 收到、记到 BridgeLog。
+ * 本步只到「收到 + 记日志」；分发到能力（提交4）、回调 H5（提交5）后续接入。
  */
 @HMRouter({ pageUrl: RouterConstants.PAGE_WEB_RUNTIME })
 @ComponentV2
 export struct WebRuntimePage {
   private controller: webview.WebviewController = new webview.WebviewController();
-  /** 加载进度 0~100 */
+  /** 注册给 H5 的桥接通道对象（window.ascfBridge） */
+  private bridge: WebBridgeChannel = new WebBridgeChannel();
+  /** 桥接日志（单例，UI 读它显示收到的请求） */
+  private bridgeLog: BridgeLog = getBridgeLog();
+
   @Local progress: number = 0;
-  /** H5 文档标题（onTitleReceive 回填） */
   @Local title: string = 'Web 容器';
-  /** 未开始 / 加载中 / 已完成 / 出错 */
   @Local loadState: string = '未开始';
-  /** 资源加载错误信息 */
   @Local errorMsg: string = '';
 
   build() {
@@ -49,14 +49,12 @@ export struct WebRuntimePage {
       .width('100%')
       .padding({ left: 14, right: 14, top: 12, bottom: 8 })
 
-      // ── 加载进度条（加载中显示）──
       if (this.loadState === '加载中') {
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
           .width('100%')
           .color('#0A59F7')
       }
 
-      // ── 错误提示 ──
       if (this.errorMsg.length > 0) {
         Text('⚠ ' + this.errorMsg)
           .fontSize(12)
@@ -65,10 +63,16 @@ export struct WebRuntimePage {
           .padding({ left: 14, right: 14, top: 4, bottom: 4 })
       }
 
-      // ── Web 区域：加载本地 rawfile H5 ──
+      // ── Web 区域 ──
       Web({ src: $rawfile('ascf_bridge_demo.html'), controller: this.controller })
         .javaScriptAccess(true)
         .domStorageAccess(true)
+        .javaScriptProxy({
+          object: this.bridge,
+          name: 'ascfBridge',
+          methodList: ['send'],
+          controller: this.controller
+        })
         .onPageBegin(() => {
           this.loadState = '加载中';
           this.errorMsg = '';
@@ -86,11 +90,79 @@ export struct WebRuntimePage {
           this.progress = 100;
         })
         .onErrorReceive((event) => {
-          this.loadState = '出错';
-          this.errorMsg = event.error.getErrorInfo();
+          // 只认主文档错误，忽略 favicon 等子资源 404
+          if (event.request.isMainFrame()) {
+            this.loadState = '出错';
+            this.errorMsg = event.error.getErrorInfo();
+          }
         })
         .width('100%')
         .layoutWeight(1)
+
+      // ── 桥接日志面板：ArkTS 收到的请求（action / id / params）──
+      Column({ space: 6 }) {
+        Row() {
+          Text('桥接日志 · ArkTS 收到 (' + this.bridgeLog.entries.length.toString() + ')')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#3C4043')
+          Blank()
+          Text('清空')
+            .fontSize(12)
+            .fontColor('#0A59F7')
+            .onClick(() => {
+              this.bridgeLog.clear();
+            })
+        }
+        .width('100%')
+
+        if (this.bridgeLog.entries.length === 0) {
+          Text('点 H5 里的按钮，ArkTS 收到的请求会出现在这里')
+            .fontSize(12)
+            .fontColor('#9AA0A6')
+            .width('100%')
+        } else {
+          List({ space: 6 }) {
+            ForEach(this.bridgeLog.entries, (e: BridgeLogEntry) => {
+              ListItem() {
+                Row({ space: 8 }) {
+                  Text(e.action)
+                    .fontSize(10)
+                    .fontColor('#FFFFFF')
+                    .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                    .borderRadius(4)
+                    .backgroundColor('#0A59F7')
+                  Column({ space: 2 }) {
+                    Text('id ' + e.id)
+                      .fontSize(10)
+                      .fontColor('#9AA0A6')
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(e.requestJson)
+                      .fontSize(11)
+                      .fontColor('#3C4043')
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+                  Text(e.status === 'error' ? '失败' : (e.status === 'done' ? '完成' : '待处理'))
+                    .fontSize(11)
+                    .fontColor(e.status === 'error' ? '#FF3B30' : (e.status === 'done' ? '#34C759' : '#FF9500'))
+                }
+                .width('100%')
+              }
+            }, (e: BridgeLogEntry) => e.id)
+          }
+          .layoutWeight(1)
+          .width('100%')
+        }
+      }
+      .width('100%')
+      .height(196)
+      .padding(12)
+      .backgroundColor('#FFFFFF')
+      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
     .height('100%')

@@ -8,41 +8,64 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, "Helvetica Neue", sans-serif;
-      background: #f5f6f7;
-      color: #1a1a1a;
-      padding: 16px;
+      background: #f5f6f7; color: #1a1a1a; padding: 14px;
       -webkit-text-size-adjust: 100%;
     }
     .card {
-      background: #fff;
-      border-radius: 14px;
-      padding: 18px 16px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      background: #fff; border-radius: 14px; padding: 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05); margin-bottom: 12px;
     }
-    h1 { font-size: 20px; margin-bottom: 6px; }
+    h1 { font-size: 19px; margin-bottom: 6px; }
     .sub { font-size: 13px; color: #6b7075; line-height: 1.6; margin-bottom: 14px; }
-    .row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 10px 0; border-top: 1px solid #eee; font-size: 14px;
+    .btns { display: flex; flex-direction: column; gap: 10px; }
+    button {
+      font-size: 15px; color: #fff; background: #0a59f7; border: none;
+      border-radius: 10px; padding: 12px; width: 100%;
     }
-    .row b { color: #0a59f7; }
-    .note {
-      margin-top: 14px; font-size: 12px; color: #9aa0a6; line-height: 1.6;
-      background: #f5f6f7; border-radius: 8px; padding: 10px;
+    button:active { opacity: 0.8; }
+    .loghead { font-size: 13px; font-weight: 600; color: #3c4043; margin-bottom: 8px; }
+    .log {
+      font-size: 12px; color: #3c4043; line-height: 1.7;
+      max-height: 180px; overflow-y: auto; word-break: break-all;
     }
+    .log div { padding: 4px 0; border-top: 1px solid #f0f0f0; }
+    .empty { font-size: 12px; color: #9aa0a6; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>🌐 ASCF Web 容器 Demo</h1>
-    <p class="sub">这是一个由鸿蒙 ArkWeb 容器加载的<b>本地 H5 页面</b>（resources/rawfile/ascf_bridge_demo.html）。本步先确认「鸿蒙页面能嵌入 Web 页面」。</p>
-    <div class="row"><span>页面状态</span><b id="state">已加载</b></div>
-    <div class="row"><span>加载时间</span><b id="time">-</b></div>
-    <p class="note">下一步将接入 JSBridge：H5 点按钮 → 调 ArkTS 方法 → ArkTS 调模拟底座能力 → 结果回传 H5 显示。</p>
+    <h1>🌐 ASCF Bridge Demo</h1>
+    <p class="sub">点按钮，H5 会按 <b>BridgeRequest</b> 格式（id / action / params）把请求发给 ArkTS。本步只跑通「H5 → ArkTS」这半条链路，返回结果在后续步骤接入。</p>
+    <div class="btns">
+      <button onclick="callNative('getDeviceInfo')">获取设备信息</button>
+      <button onclick="callNative('getCurrentTime')">获取当前时间</button>
+      <button onclick="callNative('openToast', { message: 'Hello from H5 👋' })">弹 Toast</button>
+    </div>
   </div>
+
+  <div class="card">
+    <div class="loghead">H5 侧日志</div>
+    <div id="log" class="log"><span class="empty">点上面的按钮试试……</span></div>
+  </div>
+
   <script>
-    // 一点点 JS：证明 Web 容器里的脚本能跑，并让标题/内容就绪
-    document.getElementById('time').textContent = new Date().toLocaleTimeString();
+    var seq = 0;
+    function log(s) {
+      var el = document.getElementById('log');
+      var t = new Date().toLocaleTimeString();
+      el.innerHTML = '<div>[' + t + '] ' + s + '</div>' + (seq <= 1 ? '' : el.innerHTML);
+    }
+    function callNative(action, params) {
+      seq++;
+      var req = { id: 'req_' + Date.now() + '_' + seq, action: action, params: params || {} };
+      // window.ascfBridge 由 ArkTS 通过 javaScriptProxy 注入
+      if (window.ascfBridge && window.ascfBridge.send) {
+        window.ascfBridge.send(JSON.stringify(req));
+        log('→ 发出 <b>' + action + '</b>：' + JSON.stringify(req));
+      } else {
+        log('⚠ ascfBridge 未注入（请在鸿蒙容器里打开本页）');
+      }
+    }
   </script>
 </body>
 </html>
