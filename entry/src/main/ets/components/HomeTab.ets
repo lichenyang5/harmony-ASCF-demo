@@ -28,6 +28,16 @@ export struct HomeTab {
               param: '来自首页'
             });
           })
+
+        Button('🌐 Web 容器 Demo →')
+          .width('100%')
+          .backgroundColor('#34C759')
+          .onClick(() => {
+            HMRouterMgr.push({
+              navigationId: RouterConstants.NAV_ID,
+              pageUrl: RouterConstants.PAGE_WEB_RUNTIME
+            });
+          })
       }
       .width('100%')
       .padding(20)

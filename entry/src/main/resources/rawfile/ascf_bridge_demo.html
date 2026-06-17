@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASCF Bridge Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "Helvetica Neue", sans-serif;
+      background: #f5f6f7;
+      color: #1a1a1a;
+      padding: 16px;
+      -webkit-text-size-adjust: 100%;
+    }
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 18px 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+    h1 { font-size: 20px; margin-bottom: 6px; }
+    .sub { font-size: 13px; color: #6b7075; line-height: 1.6; margin-bottom: 14px; }
+    .row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 0; border-top: 1px solid #eee; font-size: 14px;
+    }
+    .row b { color: #0a59f7; }
+    .note {
+      margin-top: 14px; font-size: 12px; color: #9aa0a6; line-height: 1.6;
+      background: #f5f6f7; border-radius: 8px; padding: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🌐 ASCF Web 容器 Demo</h1>
+    <p class="sub">这是一个由鸿蒙 ArkWeb 容器加载的<b>本地 H5 页面</b>（resources/rawfile/ascf_bridge_demo.html）。本步先确认「鸿蒙页面能嵌入 Web 页面」。</p>
+    <div class="row"><span>页面状态</span><b id="state">已加载</b></div>
+    <div class="row"><span>加载时间</span><b id="time">-</b></div>
+    <p class="note">下一步将接入 JSBridge：H5 点按钮 → 调 ArkTS 方法 → ArkTS 调模拟底座能力 → 结果回传 H5 显示。</p>
+  </div>
+  <script>
+    // 一点点 JS：证明 Web 容器里的脚本能跑，并让标题/内容就绪
+    document.getElementById('time').textContent = new Date().toLocaleTimeString();
+  </script>
+</body>
+</html>
