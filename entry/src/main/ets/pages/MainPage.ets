@@ -65,6 +65,6 @@ export struct MainPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F6F7')
+    .backgroundColor('#F5F7FB')
   }
 }

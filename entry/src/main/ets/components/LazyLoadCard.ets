@@ -108,7 +108,7 @@ export struct LazyLoadCard {
       }
       .height(150)
       .width('100%')
-      .backgroundColor('#F5F6F7')
+      .backgroundColor('#F5F7FB')
       .borderRadius(8)
       .padding(8)
       .align(Alignment.TopStart)
