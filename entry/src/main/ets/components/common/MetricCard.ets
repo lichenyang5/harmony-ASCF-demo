@@ -31,6 +31,7 @@ export struct MetricCard {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
+    .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding(12)
     .backgroundColor(this.bgColor)
