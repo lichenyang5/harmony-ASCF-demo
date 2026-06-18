@@ -1,44 +1,24 @@
-import { BridgeRequest, BridgeResponse, BridgeAction, BridgeCode } from './BridgeProtocol';
+import { BridgeRequest, BridgeResponse } from './BridgeProtocol';
 import { NativeAbilityBiz } from './NativeAbilityBiz';
+import { NativeAbilityRegistry } from './NativeAbilityRegistry';
 
 /**
  * 桥接分发器：模拟 ASCF 里的「小程序 API 分发层」。
  *
- * 拿一个 BridgeRequest，按 request.action 找到对应能力实现，
- * 结果统一包成 BridgeResponse；未知 action / 执行异常都回**统一错误结构**。
- * 这就是「前端调一个 API → 底座按 action 找能力」的核心。
+ * 不再写一长串 if-else——启动时把 Biz 提供的能力注册进 NativeAbilityRegistry，
+ * dispatch 时按 action 查表执行。未知 action / 缺字段 / 执行异常都由注册中心
+ * 回统一错误结构（见 NativeAbilityRegistry.dispatch）。
  */
 export class BridgeDispatcher {
   private biz: NativeAbilityBiz = new NativeAbilityBiz();
+  private registry: NativeAbilityRegistry = new NativeAbilityRegistry();
+
+  constructor() {
+    // 启动时把 Biz 提供的能力注册进注册中心；以后加能力只动 Biz.registerTo，不动这里
+    this.biz.registerTo(this.registry);
+  }
 
   dispatch(req: BridgeRequest): BridgeResponse {
-    try {
-      if (req.action === BridgeAction.GET_DEVICE_INFO) {
-        return BridgeDispatcher.ok(req.id, this.biz.getDeviceInfo());
-      }
-      if (req.action === BridgeAction.GET_CURRENT_TIME) {
-        return BridgeDispatcher.ok(req.id, this.biz.getCurrentTime());
-      }
-      if (req.action === BridgeAction.OPEN_TOAST) {
-        let message = '';
-        if (req.params && req.params['message']) {
-          message = req.params['message'];
-        }
-        return BridgeDispatcher.ok(req.id, this.biz.openToast(message));
-      }
-      return BridgeDispatcher.fail(req.id, BridgeCode.UNKNOWN_ACTION, '未知 action: ' + req.action);
-    } catch (e) {
-      return BridgeDispatcher.fail(req.id, BridgeCode.INTERNAL_ERROR, '能力执行出错');
-    }
-  }
-
-  private static ok(id: string, data: Record<string, string>): BridgeResponse {
-    const resp: BridgeResponse = { id: id, code: BridgeCode.OK, message: 'success', data: data };
-    return resp;
-  }
-
-  private static fail(id: string, code: number, message: string): BridgeResponse {
-    const resp: BridgeResponse = { id: id, code: code, message: message };
-    return resp;
+    return this.registry.dispatch(req);
   }
 }

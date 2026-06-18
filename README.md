@@ -99,10 +99,85 @@ MyApplication2/
 | 7 | [JSBridge 分发层 - 按 action 找到底座能力](docs/7-JSBridge分发层-按action找到底座能力.md) | Dispatcher 分发 |
 | 8 | [JSBridge 闭环与容器治理](docs/8-JSBridge闭环与容器治理-兼谈AtomicServiceEnhancedWeb.md) | `runJavaScript` 回传 + 治理 |
 
+## JSBridge 协议升级与 Native 能力注册中心
+
+这一节记录把 JSBridge 从「能通信」升级到「更像真实小程序底座」做了什么、为什么这么做。
+
+### 为什么需要 requestId
+
+H5 调 `window.ascfBridge.send(req)` 是「发出去就返回」的，真正的结果是 ArkTS 处理完之后，再通过 `runJavaScript` **异步**回调 H5 的。一来一回是两次独立的调用，所以必须给每次请求生成一个唯一 `id`，响应里带回同一个 `id`，H5 才能把「这条响应」配回「那次调用」。
+
+### 为什么需要 callback 管理
+
+H5 侧用一张 `pending` 表（`id → { resolve, reject, timer }`）保存每次调用的回调。ArkTS 回传时，`window.__ascfOnResponse` 按 `id` 在表里找回对应回调并 resolve / reject；找不到（比如已超时被清理）就打一条日志，不会静默丢弃。
+
+### 为什么需要 timeout
+
+如果 ArkTS 因为异常没有回调，H5 的回调会永远挂着。所以每次调用都挂一个定时器（默认 5000ms），到点还没收到响应就按 `408 TIMEOUT` 主动 reject，并清掉 pending。H5 SDK 封装成：
+
+```js
+ascf.call('getLocation', {}, { timeout: 3000 })
+  .then(resp => { /* resp.data */ })
+  .catch(resp => { /* resp.code === 408 即超时 */ });
+```
+
+### 为什么把 action 分发改成 registry
+
+原来 `BridgeDispatcher` 用一长串 `if (action === 'xxx')` 分发，加一个能力就要改主流程。现在引入 `NativeAbilityRegistry`（`register / has / dispatch`），把 `action → handler` 存进一张表：
+
+- `NativeAbilityBiz.registerTo(registry)` 负责声明「我提供哪些能力」；
+- `BridgeDispatcher.dispatch` 只剩一行 `return registry.dispatch(req)`；
+- 以后新增能力只需 `register` 一个 handler，不动分发主流程。
+
+统一错误码：`OK=0 / BAD_REQUEST=400 / TIMEOUT=408 / UNKNOWN_ACTION=404 / INTERNAL_ERROR=500`。缺 id/action、未知 action、handler 抛异常，都会回标准 `BridgeResponse`，不会静默失败。
+
+### 新增了哪些模拟 Native 能力
+
+| action | 说明 | 实现 |
+|---|---|---|
+| `getDeviceInfo` | 设备品牌 / 型号 / 系统版本 | 真实读 `deviceInfo` |
+| `getCurrentTime` | 当前时间戳 / 本地时间 | 真实 `Date` |
+| `openToast` | 弹鸿蒙原生 Toast | 页面 `UIContext` |
+| `setClipboardData` | 写剪贴板 | 内存 mock（注释含真机 `pasteboard` 写法）|
+| `getClipboardData` | 读剪贴板 | 内存 mock |
+| `getLocation` | 获取定位 | 固定模拟坐标（`source: mock`）|
+
+> 剪贴板默认走内存 mock，是为了「在任何环境都能编译、可演示」；真机接入改用 `@kit.BasicServicesKit` 的 `pasteboard` 同步 API 即可（代码注释里给了写法）。定位为模拟数据，不申请定位权限。
+
+### 完整调用流程
+
+```text
+H5  ascf.call(action, params)            // 生成 requestId，挂 timeout，存 pending
+→  window.ascfBridge.send(JSON)          // H5 → ArkTS（javaScriptProxy 注入的 send）
+→  WebBridgeChannel.send                 // 解析 + 校验（缺字段回 BAD_REQUEST，不静默）
+→  BridgeDispatcher.dispatch
+→  NativeAbilityRegistry.dispatch        // 按 action 查表
+→  NativeAbilityBiz / NativeAbilityImp   // 执行模拟底座能力
+→  组装 BridgeResponse + BridgeLog 记录
+→  controller.runJavaScript              // ArkTS → H5（setTimeout(0) 下一拍，避免重入）
+→  window.__ascfOnResponse(json)         // 按 id 找回 pending 的回调
+→  resolve / reject                      // 更新「最近结果 / 状态 / 日志」
+```
+
+### 真机 / 模拟器验证方式
+
+1. DevEco Studio 打开工程，连元服务模拟器或真机，Run `entry`。
+2. 首页 →「打开 Web 容器」进入 **JSBridge 调试实验室**。
+3. 逐个点 H5 按钮：
+   - 获取设备信息 / 当前时间 → 「最近结果」返回真实数据，状态变「成功」；
+   - 弹 Toast → 鸿蒙原生 Toast 弹出；
+   - 写入剪贴板 → 再点读取剪贴板，应读回刚写入的文本；
+   - 获取模拟定位 → 返回 Hong Kong 模拟坐标；
+   - 调用未知能力 → 状态变「失败」，结果显示 `[404] 未知 action`（演示统一错误）。
+4. 看页面下方 **桥接日志**：每条都有 action / 状态 / id / 请求 / 响应。
+5. 点右下角悬浮球打开 **NetMonitor**，可一并查看网络调用。
+
 ## 后续计划
 
-- [ ] 接入更多模拟 Native 能力（定位 / 扫码 / 支付）
+- [x] 模拟 Native 能力：剪贴板、定位（已接入）
+- [x] 桥接协议升级：requestId / 统一错误码 / H5 超时 / 能力注册中心（已接入）
+- [ ] 更多模拟 Native 能力（扫码 / 支付 / 分享）
+- [ ] 桥接超时的 ArkTS 侧 pending 队列 + 重试
 - [ ] Web 容器预加载与多实例治理
-- [ ] 桥接协议版本化 + 超时 / 重试机制
 - [ ] 主题系统与暗色模式
 - [ ] 为 Biz / Imp 层补单元测试
