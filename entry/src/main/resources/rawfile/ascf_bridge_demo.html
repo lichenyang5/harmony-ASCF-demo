@@ -17,14 +17,31 @@
     }
     h1 { font-size: 19px; margin-bottom: 6px; }
     .sub { font-size: 13px; color: #6b7075; line-height: 1.6; margin-bottom: 14px; }
+    .sub code { background: #eef1f6; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
     .btns { display: flex; flex-direction: column; gap: 10px; }
+    .row { display: flex; gap: 10px; }
+    .row button { flex: 1; }
     button {
       font-size: 15px; color: #fff; background: #0a59f7; border: none;
       border-radius: 10px; padding: 12px; width: 100%;
     }
+    button.alt { background: #0aa1c7; }
+    button.purple { background: #af52de; }
     button.ghost { background: #fff; color: #ff9500; border: 1px solid #ffd591; }
     button:active { opacity: 0.8; }
-    .loghead { font-size: 13px; font-weight: 600; color: #3c4043; margin-bottom: 8px; }
+    input {
+      width: 100%; font-size: 14px; padding: 11px; color: #1a1a1a;
+      border: 1px solid #e3e6eb; border-radius: 10px; background: #fafbfc;
+    }
+    .loghead {
+      font-size: 13px; font-weight: 600; color: #3c4043; margin-bottom: 8px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .pill { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 10px; }
+    .pill.idle { color: #9aa0a6; background: #f0f1f3; }
+    .pill.run  { color: #ff9500; background: #fff3e0; }
+    .pill.ok   { color: #34c759; background: #e7f8ec; }
+    .pill.err  { color: #ff3b30; background: #feeceb; }
     .result { background: #f5f6f7; border-radius: 8px; padding: 10px; }
     .result pre { font-size: 12px; color: #0a59f7; white-space: pre-wrap; word-break: break-all; }
     .log {
@@ -38,17 +55,30 @@
 <body>
   <div class="card">
     <h1>🌐 ASCF Bridge Demo</h1>
-    <p class="sub">点按钮跑通完整闭环：<b>H5 → ArkTS → 模拟底座能力 → ArkTS → H5</b>。结果会回到下面「最近结果」。</p>
+    <p class="sub">点按钮跑通完整闭环：<b>H5 → ArkTS → 模拟底座能力 → ArkTS → H5</b>。
+      统一走 <code>ascf.call(action, params, options)</code>，带 requestId 与超时（默认 5000ms）。</p>
     <div class="btns">
-      <button onclick="callNative('getDeviceInfo')">获取设备信息</button>
-      <button onclick="callNative('getCurrentTime')">获取当前时间</button>
-      <button onclick="callNative('openToast', { message: 'Hello from H5 👋' })">弹 Toast（鸿蒙原生）</button>
+      <div class="row">
+        <button onclick="callDeviceInfo()">获取设备信息</button>
+        <button onclick="callCurrentTime()">获取当前时间</button>
+      </div>
+      <button onclick="callToast()">弹 Toast（鸿蒙原生）</button>
+      <div class="row">
+        <button class="alt" onclick="callLocation()">获取模拟定位</button>
+        <button class="alt" onclick="callGetClip()">读取剪贴板</button>
+      </div>
+      <input id="clipText" value="Hello ASCF 👋" />
+      <button class="purple" onclick="callSetClip()">写入剪贴板</button>
+      <button class="ghost" onclick="callUnknown()">调用未知能力（演示统一错误）</button>
       <button class="ghost" onclick="tryExternal()">尝试打开外部链接（会被白名单拦截）</button>
     </div>
   </div>
 
   <div class="card">
-    <div class="loghead">最近结果（ArkTS 回传）</div>
+    <div class="loghead">
+      <span>最近结果（ArkTS 回传）</span>
+      <span id="status" class="pill idle">待调用</span>
+    </div>
     <div id="result" class="result"><span class="empty">还没有结果</span></div>
   </div>
 
@@ -58,49 +88,125 @@
   </div>
 
   <script>
-    var seq = 0;
+    // ---------- 小工具：日志 / 状态 / 结果 ----------
     function log(s) {
       var el = document.getElementById('log');
       var t = new Date().toLocaleTimeString();
-      var prev = (el.querySelector('.empty')) ? '' : el.innerHTML;
+      var prev = el.querySelector('.empty') ? '' : el.innerHTML;
       el.innerHTML = '<div>[' + t + '] ' + s + '</div>' + prev;
     }
-    function tail4(id) { return id ? id.slice(-4) : '????'; }
-
-    function callNative(action, params) {
-      seq++;
-      var req = { id: 'req_' + Date.now() + '_' + seq, action: action, params: params || {} };
-      if (window.ascfBridge && window.ascfBridge.send) {
-        window.ascfBridge.send(JSON.stringify(req));
-        log('① H5 发出 <b>' + action + '</b> · id …' + tail4(req.id));
-      } else {
-        log('⚠ ascfBridge 未注入（请在鸿蒙容器里打开本页）');
-      }
+    function tail4(id) { return id ? String(id).slice(-4) : '????'; }
+    function setStatus(kind, text) {
+      var el = document.getElementById('status');
+      el.className = 'pill ' + kind;
+      el.textContent = text;
     }
+    function showResult(resp) {
+      var el = document.getElementById('result');
+      var ok = resp && resp.code === 0;
+      var body = ok
+        ? JSON.stringify((resp && resp.data) || {}, null, 2)
+        : ('[' + (resp ? resp.code : '?') + '] ' + (resp ? resp.message : '无响应'));
+      el.innerHTML = '<pre>' + body + '</pre>';
+    }
+
+    // ---------- ascf 桥 SDK：requestId + callback 管理 + timeout ----------
+    // 为什么要这层：H5 → ArkTS 是「发出去就返回」的，响应是 ArkTS 之后通过
+    // runJavaScript 异步回调的。必须用 requestId 把「哪次响应配哪次调用」对上，
+    // 再加 timeout 防止 ArkTS 不回导致 callback 永远挂着。
+    var ascf = (function () {
+      var pending = {};        // id -> { resolve, reject, timer, action }
+      var seq = 0;
+      var VERSION = '1.0';
+      var DEFAULT_TIMEOUT = 5000;
+
+      function genId() { seq++; return 'req_' + Date.now() + '_' + seq; }
+
+      function call(action, params, options) {
+        options = options || {};
+        var timeout = options.timeout || DEFAULT_TIMEOUT;
+        var id = genId();
+        return new Promise(function (resolve, reject) {
+          if (!(window.ascfBridge && window.ascfBridge.send)) {
+            reject({ id: id, code: -1, message: 'ascfBridge 未注入（请在鸿蒙容器里打开本页）' });
+            return;
+          }
+          // 超时：到点还没回，就清掉 pending 并按 408 拒绝
+          var timer = setTimeout(function () {
+            if (pending[id]) {
+              delete pending[id];
+              reject({ id: id, code: 408, message: '调用超时（' + timeout + 'ms）' });
+            }
+          }, timeout);
+          pending[id] = { resolve: resolve, reject: reject, timer: timer, action: action };
+
+          var req = { version: VERSION, id: id, action: action, params: params || {}, timeout: timeout };
+          window.ascfBridge.send(JSON.stringify(req));
+        });
+      }
+
+      // ArkTS 通过 runJavaScript 调 window.__ascfOnResponse → 这里按 id 找回回调
+      function onResponse(jsonStr) {
+        var resp;
+        try {
+          resp = JSON.parse(jsonStr);
+        } catch (e) {
+          log('④ H5 收到非法响应（JSON 解析失败）');
+          return;
+        }
+        var p = pending[resp.id];
+        if (!p) {
+          // 找不到对应 callback：可能已超时被清理，或响应 id 为空（如非法请求兜底）
+          log('⚠ 收到无匹配 callback 的响应 · id …' + tail4(resp.id) + '（可能已超时）');
+          return;
+        }
+        clearTimeout(p.timer);
+        delete pending[resp.id];
+        if (resp.code === 0) {
+          p.resolve(resp);
+        } else {
+          p.reject(resp);
+        }
+      }
+
+      return { call: call, _onResponse: onResponse };
+    })();
+
+    // ArkTS 回传入口（保持与 WebBridgeChannel.sendBack 约定的函数名一致）
+    window.__ascfOnResponse = function (jsonStr) { ascf._onResponse(jsonStr); };
+
+    // ---------- 统一发起 + 渲染成功 / 失败 / 超时 ----------
+    function run(action, params, options) {
+      setStatus('run', '调用中…');
+      log('① H5 发出 <b>' + action + '</b>');
+      ascf.call(action, params, options).then(function (resp) {
+        log('④ H5 收到结果 · id …' + tail4(resp.id) + ' · 成功');
+        setStatus('ok', '成功');
+        showResult(resp);
+      }).catch(function (resp) {
+        var isTimeout = resp && resp.code === 408;
+        log('④ H5 调用失败 · id …' + tail4(resp && resp.id) + ' · ['
+          + (resp ? resp.code : '?') + '] ' + (resp ? resp.message : '未知错误'));
+        setStatus('err', isTimeout ? '超时' : '失败');
+        showResult(resp);
+      });
+    }
+
+    // ---------- 各按钮 ----------
+    function callDeviceInfo() { run('getDeviceInfo'); }
+    function callCurrentTime() { run('getCurrentTime'); }
+    function callToast() { run('openToast', { message: 'Hello from H5 👋' }); }
+    function callLocation() { run('getLocation'); }
+    function callGetClip() { run('getClipboardData'); }
+    function callSetClip() {
+      var t = document.getElementById('clipText').value || '';
+      run('setClipboardData', { text: t });
+    }
+    function callUnknown() { run('noSuchAction'); }
 
     function tryExternal() {
       log('① H5 尝试跳转 https://example.com（应被容器白名单拦截）');
       window.location.href = 'https://example.com/should-be-blocked';
-    }
-
-    // ArkTS 处理完，通过 runJavaScript 调这个全局函数，把 BridgeResponse 送回 H5
-    window.__ascfOnResponse = function (jsonStr) {
-      try {
-        var resp = JSON.parse(jsonStr);
-        var ok = resp.code === 0;
-        log('④ H5 收到结果 · id …' + tail4(resp.id) + ' · ' + (ok ? '成功' : ('失败 ' + resp.code)));
-        showResult(resp);
-      } catch (e) {
-        log('④ H5 收到非法响应');
-      }
-    };
-
-    function showResult(resp) {
-      var el = document.getElementById('result');
-      var body = (resp.code === 0)
-        ? JSON.stringify(resp.data || {}, null, 2)
-        : ('[' + resp.code + '] ' + resp.message);
-      el.innerHTML = '<pre>' + body + '</pre>';
     }
   </script>
 </body>
