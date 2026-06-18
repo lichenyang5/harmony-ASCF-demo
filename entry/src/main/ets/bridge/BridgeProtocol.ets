@@ -13,6 +13,10 @@ export class BridgeAction {
   static readonly GET_DEVICE_INFO: string = 'getDeviceInfo';
   static readonly GET_CURRENT_TIME: string = 'getCurrentTime';
   static readonly OPEN_TOAST: string = 'openToast';
+  // 提交3 新增的模拟底座能力
+  static readonly SET_CLIPBOARD_DATA: string = 'setClipboardData';
+  static readonly GET_CLIPBOARD_DATA: string = 'getClipboardData';
+  static readonly GET_LOCATION: string = 'getLocation';
 }
 
 /** 统一错误码 */
