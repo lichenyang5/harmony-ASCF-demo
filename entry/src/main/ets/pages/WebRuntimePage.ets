@@ -4,6 +4,8 @@ import { webview } from '@kit.ArkWeb';
 import { WebBridgeChannel } from '../bridge/WebBridgeChannel';
 import { BridgeLog, BridgeLogEntry, getBridgeLog } from '../bridge/BridgeLog';
 import { StatusPill } from '../components/common/StatusPill';
+import { WebRuntimeState } from '../webcontainer/WebRuntimeState';
+import { WebGuard, WebGuardResult } from '../webcontainer/WebGuard';
 
 /**
  * JSBridge 调试实验室（原 Web 容器页）：标准 Web 加载本地 H5，跑通完整闭环
@@ -11,9 +13,10 @@ import { StatusPill } from '../components/common/StatusPill';
  *
  * - 桥：javaScriptProxy 注入 window.ascfBridge；ArkTS 处理完用 controller.runJavaScript 回传 H5。
  * - 真实副作用：openToast 用页面 UIContext 弹鸿蒙 Toast（aboutToAppear 里绑给 channel）。
- * - 治理：加载进度/标题/资源错误/HTTP 错误/简单白名单拦截。
+ * - 治理：加载进度/标题/资源错误/HTTP 错误 → WebRuntimeState；白名单拦截 → WebGuard。
  *
- * 本次只做视觉包装：Web 组件配置、javaScriptProxy、各治理回调、桥接闭环全部保持不变。
+ * 本次只做结构重构：状态字段下沉到 WebRuntimeState，白名单逻辑下沉到 WebGuard，
+ * 页面只负责布局、事件回调和 BridgeLog 展示；Web 组件配置、javaScriptProxy、桥接闭环保持不变。
  */
 @HMRouter({ pageUrl: RouterConstants.PAGE_WEB_RUNTIME })
 @ComponentV2
@@ -21,15 +24,11 @@ export struct WebRuntimePage {
   private controller: webview.WebviewController = new webview.WebviewController();
   private bridge: WebBridgeChannel = new WebBridgeChannel(this.controller);
   private bridgeLog: BridgeLog = getBridgeLog();
-  /** 白名单：只放行这些 http(s) 前缀，其余远程地址拦截 */
-  private readonly allowList: string[] = ['https://developer.huawei.com'];
+  /** 白名单/URL 安全判断已下沉到 WebGuard，页面不再写零散判断 */
+  private guard: WebGuard = new WebGuard();
 
-  @Local progress: number = 0;
-  @Local title: string = 'Web 容器';
-  @Local loadState: string = '未开始';
-  @Local errorMsg: string = '';
-  /** 容器治理事件（HTTP 错误 / 白名单拦截） */
-  @Local guardMsg: string = '';
+  /** Web 容器运行时状态（progress / title / loadState / errorMsg / guardMsg / currentUrl） */
+  @Local state: WebRuntimeState = new WebRuntimeState();
 
   aboutToAppear(): void {
     // 把「弹真实 Toast」的能力绑给桥（用页面的 UIContext，在点按钮时才真正取）
@@ -38,34 +37,19 @@ export struct WebRuntimePage {
     });
   }
 
-  /** 简单白名单拦截：非 http(s) 一律放行（本地资源等），http(s) 只放行白名单，其余拦截 */
-  private shouldIntercept(url: string): boolean {
-    const isHttp = url.startsWith('http://') || url.startsWith('https://');
-    if (!isHttp) {
-      return false;
-    }
-    for (const a of this.allowList) {
-      if (url.startsWith(a)) {
-        return false;
-      }
-    }
-    this.guardMsg = '已拦截非白名单地址：' + url;
-    return true;
-  }
-
   /** 加载状态 → 胶囊文字色 */
   private loadColor(): string {
-    if (this.loadState === '已完成') { return '#34C759'; }
-    if (this.loadState === '出错') { return '#FF3B30'; }
-    if (this.loadState === '加载中') { return '#FF9500'; }
+    if (this.state.loadState === '已完成') { return '#34C759'; }
+    if (this.state.loadState === '出错') { return '#FF3B30'; }
+    if (this.state.loadState === '加载中') { return '#FF9500'; }
     return '#9AA0A6';
   }
 
   /** 加载状态 → 胶囊背景色 */
   private loadBg(): string {
-    if (this.loadState === '已完成') { return '#E7F8EC'; }
-    if (this.loadState === '出错') { return '#FEECEB'; }
-    if (this.loadState === '加载中') { return '#FFF3E0'; }
+    if (this.state.loadState === '已完成') { return '#E7F8EC'; }
+    if (this.state.loadState === '出错') { return '#FEECEB'; }
+    if (this.state.loadState === '加载中') { return '#FFF3E0'; }
     return '#F0F1F3';
   }
 
@@ -107,27 +91,27 @@ export struct WebRuntimePage {
           .fontColor('#1A1A1A')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        StatusPill({ text: this.loadState, color: this.loadColor(), bgColor: this.loadBg() })
+        StatusPill({ text: this.state.loadState, color: this.loadColor(), bgColor: this.loadBg() })
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 12, bottom: 8 })
 
-      if (this.loadState === '加载中') {
-        Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
+      if (this.state.loadState === '加载中') {
+        Progress({ value: this.state.progress, total: 100, type: ProgressType.Linear })
           .width('100%')
           .color('#0A59F7')
       }
 
-      if (this.errorMsg.length > 0) {
-        Text('⚠ ' + this.errorMsg)
+      if (this.state.errorMsg.length > 0) {
+        Text('⚠ ' + this.state.errorMsg)
           .fontSize(12)
           .fontColor('#FF3B30')
           .width('100%')
           .padding({ left: 14, right: 14, top: 4, bottom: 4 })
       }
 
-      if (this.guardMsg.length > 0) {
-        Text('🛡 ' + this.guardMsg)
+      if (this.state.guardMsg.length > 0) {
+        Text('🛡 ' + this.state.guardMsg)
           .fontSize(12)
           .fontColor('#FF9500')
           .width('100%')
@@ -145,7 +129,7 @@ export struct WebRuntimePage {
         Text('点 H5 里的按钮：请求经桥发给 ArkTS，分发到模拟底座能力后把结果回传 H5')
           .fontSize(11)
           .fontColor('#6B7075')
-        Text('当前 H5：' + this.title)
+        Text('当前 H5：' + this.state.title)
           .fontSize(11)
           .fontColor('#9AA0A6')
           .maxLines(1)
@@ -166,34 +150,35 @@ export struct WebRuntimePage {
           methodList: ['send'],
           controller: this.controller
         })
-        .onPageBegin(() => {
-          this.loadState = '加载中';
-          this.errorMsg = '';
-          this.guardMsg = '';
+        .onPageBegin((event) => {
+          this.state.resetBeforeLoad(event.url);
         })
         .onProgressChange((event) => {
-          this.progress = event.newProgress;
+          this.state.markLoading(event.newProgress);
         })
         .onTitleReceive((event) => {
           if (event.title.length > 0) {
-            this.title = event.title;
+            this.state.title = event.title;
           }
         })
         .onPageEnd(() => {
-          this.loadState = '已完成';
-          this.progress = 100;
+          this.state.markSuccess();
         })
         .onErrorReceive((event) => {
           if (event.request.isMainFrame()) {
-            this.loadState = '出错';
-            this.errorMsg = event.error.getErrorInfo();
+            this.state.markError(event.error.getErrorInfo());
           }
         })
         .onHttpErrorReceive((event) => {
-          this.guardMsg = 'HTTP 错误 ' + event.response.getResponseCode().toString();
+          this.state.markBlocked('HTTP 错误 ' + event.response.getResponseCode().toString());
         })
         .onLoadIntercept((event) => {
-          return this.shouldIntercept(event.data.getRequestUrl());
+          const result: WebGuardResult = this.guard.check(event.data.getRequestUrl());
+          if (!result.allowed) {
+            this.state.markBlocked(result.reason);
+            return true;
+          }
+          return false;
         })
         .width('100%')
         .layoutWeight(1)
