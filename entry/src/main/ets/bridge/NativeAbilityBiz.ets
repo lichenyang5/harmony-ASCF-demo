@@ -1,35 +1,92 @@
 import { NativeAbilityImp } from './NativeAbilityImp';
 import { NativeAbilityRegistry } from './NativeAbilityRegistry';
+import { AbilityMeta } from './AbilityMeta';
 import { BridgeAction, BridgeRequest } from './BridgeProtocol';
 
 /**
  * 「模拟底座能力」业务层（Biz）：编排 Imp，输出给响应用的数据，并把自己提供的
- * 能力注册进注册中心。负责「从 req.params 取参 → 调具体能力」的输入转换。
+ * 能力（连同 AbilityMeta）注册进注册中心。负责「从 req.params 取参 → 调具体能力」
+ * 的输入转换。
+ *
+ * 新增能力 / 调整 meta 都只动这里——分发主流程（BridgeDispatcher / Registry）不动。
  */
 export class NativeAbilityBiz {
   private imp: NativeAbilityImp = new NativeAbilityImp();
 
   /**
-   * 把本 Biz 提供的能力注册进注册中心。
-   * 新增能力时在这里多 register 一行即可，分发主流程（BridgeDispatcher）不用动。
+   * 把本 Biz 提供的能力（连同 AbilityMeta）注册进注册中心。
+   * meta 字段含义见 AbilityMeta.ets。
    */
   registerTo(registry: NativeAbilityRegistry): void {
-    registry.register(BridgeAction.GET_DEVICE_INFO, (req: BridgeRequest): Record<string, string> => {
+    const deviceInfoMeta: AbilityMeta = {
+      action: BridgeAction.GET_DEVICE_INFO,
+      namespace: 'device',
+      description: '获取设备信息',
+      permission: 'none',
+      mock: true,
+      enabled: true
+    };
+    registry.register(deviceInfoMeta, (req: BridgeRequest): Record<string, string> => {
       return this.getDeviceInfo();
     });
-    registry.register(BridgeAction.GET_CURRENT_TIME, (req: BridgeRequest): Record<string, string> => {
+
+    const currentTimeMeta: AbilityMeta = {
+      action: BridgeAction.GET_CURRENT_TIME,
+      namespace: 'runtime',
+      description: '获取当前时间',
+      permission: 'none',
+      mock: false,
+      enabled: true
+    };
+    registry.register(currentTimeMeta, (req: BridgeRequest): Record<string, string> => {
       return this.getCurrentTime();
     });
-    registry.register(BridgeAction.OPEN_TOAST, (req: BridgeRequest): Record<string, string> => {
+
+    const openToastMeta: AbilityMeta = {
+      action: BridgeAction.OPEN_TOAST,
+      namespace: 'ui',
+      description: '显示原生 Toast 提示',
+      permission: 'none',
+      mock: false,
+      enabled: true
+    };
+    registry.register(openToastMeta, (req: BridgeRequest): Record<string, string> => {
       return this.openToast(NativeAbilityBiz.pickParam(req, 'message'));
     });
-    registry.register(BridgeAction.SET_CLIPBOARD_DATA, (req: BridgeRequest): Record<string, string> => {
+
+    const setClipboardMeta: AbilityMeta = {
+      action: BridgeAction.SET_CLIPBOARD_DATA,
+      namespace: 'clipboard',
+      description: '写入剪贴板',
+      permission: 'clipboard.write',
+      mock: false,
+      enabled: true
+    };
+    registry.register(setClipboardMeta, (req: BridgeRequest): Record<string, string> => {
       return this.setClipboardData(NativeAbilityBiz.pickParam(req, 'text'));
     });
-    registry.register(BridgeAction.GET_CLIPBOARD_DATA, (req: BridgeRequest): Record<string, string> => {
+
+    const getClipboardMeta: AbilityMeta = {
+      action: BridgeAction.GET_CLIPBOARD_DATA,
+      namespace: 'clipboard',
+      description: '读取剪贴板',
+      permission: 'clipboard.read',
+      mock: false,
+      enabled: true
+    };
+    registry.register(getClipboardMeta, (req: BridgeRequest): Record<string, string> => {
       return this.getClipboardData();
     });
-    registry.register(BridgeAction.GET_LOCATION, (req: BridgeRequest): Record<string, string> => {
+
+    const getLocationMeta: AbilityMeta = {
+      action: BridgeAction.GET_LOCATION,
+      namespace: 'location',
+      description: '获取模拟定位信息',
+      permission: 'location.mock',
+      mock: true,
+      enabled: true
+    };
+    registry.register(getLocationMeta, (req: BridgeRequest): Record<string, string> => {
       return this.getLocation();
     });
   }

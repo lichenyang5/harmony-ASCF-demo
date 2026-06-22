@@ -59,9 +59,10 @@ export class WebBridgeChannel {
       parsed.version = '1.0';
     }
 
-    // 4) 正常链路：记请求 → 分发 → 记响应 → 下一拍执行副作用并回传
+    // 4) 正常链路：记请求（顺手带上能力元信息） → 分发 → 记响应 → 下一拍执行副作用并回传
     const req: BridgeRequest = parsed;
-    const entry = getBridgeLog().onRequest(req, jsonStr);
+    const meta = this.dispatcher.getAbilityMeta(req.action);
+    const entry = getBridgeLog().onRequest(req, jsonStr, meta);
     const resp = this.dispatcher.dispatch(req);
     const respJson = JSON.stringify(resp);
     getBridgeLog().onResponse(entry, resp, respJson);

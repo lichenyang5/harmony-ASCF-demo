@@ -26,6 +26,8 @@ export class BridgeCode {
   static readonly TIMEOUT: number = 408;
   static readonly UNKNOWN_ACTION: number = 404;
   static readonly INTERNAL_ERROR: number = 500;
+  /** 能力已注册但被禁用（AbilityMeta.enabled = false） */
+  static readonly ABILITY_DISABLED: number = 403;
 }
 
 /** 请求：H5 → ArkTS */

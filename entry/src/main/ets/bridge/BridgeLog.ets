@@ -1,8 +1,13 @@
 import { BridgeRequest, BridgeResponse } from './BridgeProtocol';
+import { AbilityMeta } from './AbilityMeta';
 
 /**
  * 一次桥接调用的日志（把请求和响应配成一对）。
  * 会随调用更新的字段加 @Trace，面板能实时看到 pending → done/error。
+ *
+ * 「能力元信息」字段（namespace / description / mock / enabled）在 onRequest 时
+ * 由注册中心查表填进来。它们在一次调用内不会变，所以无需 @Trace；调试面板要展示
+ * 时直接读即可，不会破坏现有 UI。
  */
 @ObservedV2
 export class BridgeLogEntry {
@@ -15,6 +20,14 @@ export class BridgeLogEntry {
   @Trace responseJson: string = '';
   /** pending / done / error */
   @Trace status: string = 'pending';
+  /** 能力分类（来自 AbilityMeta.namespace），未识别 action 时为空 */
+  namespace: string = '';
+  /** 能力说明（来自 AbilityMeta.description），未识别 action 时为空 */
+  description: string = '';
+  /** 是否模拟实现（来自 AbilityMeta.mock） */
+  mock: boolean = false;
+  /** 当时是否启用（来自 AbilityMeta.enabled） */
+  enabled: boolean = false;
 }
 
 /**
@@ -27,14 +40,24 @@ export class BridgeLog {
   @Trace entries: BridgeLogEntry[] = [];
   private static readonly MAX: number = 50;
 
-  /** 记录一次进来的请求，返回 entry 句柄 */
-  onRequest(req: BridgeRequest, rawJson: string): BridgeLogEntry {
+  /**
+   * 记录一次进来的请求，返回 entry 句柄。
+   * 调用方拿到 action 对应的 AbilityMeta 时，传进来一起记录；
+   * 不传也兼容（解析失败 / 未知 action 的 replyError 路径就是这种情况）。
+   */
+  onRequest(req: BridgeRequest, rawJson: string, meta?: AbilityMeta): BridgeLogEntry {
     const e = new BridgeLogEntry();
     e.id = req.id;
     e.action = req.action;
     e.time = Date.now();
     e.requestJson = rawJson;
     e.status = 'pending';
+    if (meta !== undefined) {
+      e.namespace = meta.namespace;
+      e.description = meta.description;
+      e.mock = meta.mock;
+      e.enabled = meta.enabled;
+    }
     this.entries.unshift(e);
     if (this.entries.length > BridgeLog.MAX) {
       this.entries.splice(BridgeLog.MAX, this.entries.length - BridgeLog.MAX);
