@@ -1,5 +1,6 @@
 import { BridgeRequest, BridgeResponse, BridgeCode, BridgeResponses } from './BridgeProtocol';
 import { AbilityMeta } from './AbilityMeta';
+import { BridgeLogEntry, getBridgeLog } from './BridgeLog';
 
 /**
  * Native 能力处理函数：拿到整个请求，返回响应数据（Record<string, string>）。
@@ -28,6 +29,7 @@ export interface RegisteredAbility {
  * - hasAbility(action) / isEnabled(action) / getAbility(action) 查询
  * - listAbilities() 列出所有能力的元信息
  * - dispatch(req) 按 action 找到能力，校验 enabled 后执行，统一包成 BridgeResponse
+ *   并把完整 trace（meta + 耗时 + code/message/errorStack）写进 BridgeLog
  *
  * 新增能力只需在 NativeAbilityBiz.registerTo 中多 register 一条，分发主流程
  * （BridgeDispatcher）保持薄入口、不堆 if-else。
@@ -70,28 +72,63 @@ export class NativeAbilityRegistry {
   }
 
   /**
-   * 按 action 分发并统一包错。
-   *   缺字段 → BAD_REQUEST（与 WebBridgeChannel 的前置校验形成双保险）
-   *   未注册 → UNKNOWN_ACTION
-   *   已禁用 → ABILITY_DISABLED
-   *   handler 抛错 → INTERNAL_ERROR
+   * 按 action 分发并统一包错；同时把完整 trace 写进 BridgeLog。
+   *
+   *   缺字段 → BAD_REQUEST       （trace 使用 unknown 默认 meta）
+   *   未注册 → UNKNOWN_ACTION    （trace 使用 unknown 默认 meta）
+   *   已禁用 → ABILITY_DISABLED  （trace 带 AbilityMeta，但 enabled=false）
+   *   handler 抛错 → INTERNAL_ERROR（trace 带 AbilityMeta + error message + stack）
+   *   正常返回 → OK              （trace 带 AbilityMeta + cost）
    */
   dispatch(req: BridgeRequest): BridgeResponse {
+    const log = getBridgeLog();
+
+    // 1) 缺字段（双保险；WebBridgeChannel 通常先一步拦下了）
     if (!req.id || !req.action) {
-      return BridgeResponses.fail(req.id ? req.id : '', BridgeCode.BAD_REQUEST, '缺少 id 或 action');
+      const entry: BridgeLogEntry = log.onRequest(req, JSON.stringify(req));
+      const resp = BridgeResponses.fail(req.id ? req.id : '', BridgeCode.BAD_REQUEST, '缺少 id 或 action');
+      log.onResponse(entry, resp, JSON.stringify(resp));
+      return resp;
     }
+
+    // 2) 查表；查到才有 meta，查不到留给 BridgeLogEntry 的 'unknown' 默认值
     const reg = this.abilities.get(req.action);
+    const meta: AbilityMeta | undefined = reg !== undefined ? reg.meta : undefined;
+    const entry: BridgeLogEntry = log.onRequest(req, JSON.stringify(req), meta);
+
     if (reg === undefined) {
-      return BridgeResponses.fail(req.id, BridgeCode.UNKNOWN_ACTION, '未知 action: ' + req.action);
+      const resp = BridgeResponses.fail(req.id, BridgeCode.UNKNOWN_ACTION, '未知 action: ' + req.action);
+      log.onResponse(entry, resp, JSON.stringify(resp));
+      return resp;
     }
+
     if (!reg.meta.enabled) {
-      return BridgeResponses.fail(req.id, BridgeCode.ABILITY_DISABLED, '能力已禁用: ' + req.action);
+      const resp = BridgeResponses.fail(req.id, BridgeCode.ABILITY_DISABLED, '能力已禁用: ' + req.action);
+      log.onResponse(entry, resp, JSON.stringify(resp));
+      return resp;
     }
+
     try {
       const data: Record<string, string> = reg.handler(req);
-      return BridgeResponses.ok(req.id, data);
+      const resp = BridgeResponses.ok(req.id, data);
+      log.onResponse(entry, resp, JSON.stringify(resp));
+      return resp;
     } catch (e) {
-      return BridgeResponses.fail(req.id, BridgeCode.INTERNAL_ERROR, '能力执行出错');
+      // 把真正的错误信息带回 trace；errorStack 在 ArkTS 上是可选的，做好 nullish 兜底
+      let detail: string = '未知错误';
+      let stack: string = '';
+      if (e !== null && e !== undefined) {
+        const err = e as Error;
+        if (err.message !== undefined && err.message.length > 0) {
+          detail = err.message;
+        }
+        if (err.stack !== undefined && err.stack.length > 0) {
+          stack = err.stack;
+        }
+      }
+      const resp = BridgeResponses.fail(req.id, BridgeCode.INTERNAL_ERROR, '能力执行出错: ' + detail);
+      log.onResponse(entry, resp, JSON.stringify(resp), stack);
+      return resp;
     }
   }
 }

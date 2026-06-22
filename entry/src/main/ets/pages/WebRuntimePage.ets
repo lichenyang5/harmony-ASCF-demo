@@ -229,7 +229,7 @@ export struct WebRuntimePage {
               ListItem() {
                 Column({ space: 5 }) {
                   Row({ space: 8 }) {
-                    Text(e.action)
+                    Text(e.namespace + '/' + e.action)
                       .fontSize(10)
                       .fontColor('#FFFFFF')
                       .padding({ left: 6, right: 6, top: 2, bottom: 2 })
@@ -241,7 +241,7 @@ export struct WebRuntimePage {
                       .fontColor('#9AA0A6')
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(this.stText(e.status))
+                    Text(this.stText(e.status) + (e.cost > 0 ? ' ' + e.cost.toString() + 'ms' : ''))
                       .fontSize(10)
                       .fontColor(this.stColor(e.status))
                       .padding({ left: 6, right: 6, top: 2, bottom: 2 })
