@@ -6,6 +6,7 @@ import { BridgeLog, BridgeLogEntry, getBridgeLog } from '../bridge/BridgeLog';
 import { StatusPill } from '../components/common/StatusPill';
 import { WebRuntimeState } from '../webcontainer/WebRuntimeState';
 import { WebGuard, WebGuardResult } from '../webcontainer/WebGuard';
+import { WebRuntimeController } from '../webcontainer/WebRuntimeController';
 
 /**
  * JSBridge 调试实验室（原 Web 容器页）：标准 Web 加载本地 H5，跑通完整闭环
@@ -13,14 +14,18 @@ import { WebGuard, WebGuardResult } from '../webcontainer/WebGuard';
  *
  * - 桥：javaScriptProxy 注入 window.ascfBridge；ArkTS 处理完用 controller.runJavaScript 回传 H5。
  * - 真实副作用：openToast 用页面 UIContext 弹鸿蒙 Toast（aboutToAppear 里绑给 channel）。
- * - 治理：加载进度/标题/资源错误/HTTP 错误 → WebRuntimeState；白名单拦截 → WebGuard。
+ * - 分层：
+ *     状态 → WebRuntimeState（@ObservedV2，进度/标题/错误/拦截/currentUrl）
+ *     操作 → WebRuntimeController（loadUrl/reload/goBack/runJavaScript/…）
+ *     治理 → WebGuard（白名单与 URL 安全判断）
  *
- * 本次只做结构重构：状态字段下沉到 WebRuntimeState，白名单逻辑下沉到 WebGuard，
- * 页面只负责布局、事件回调和 BridgeLog 展示；Web 组件配置、javaScriptProxy、桥接闭环保持不变。
+ * 本页只负责布局、事件绑定和 BridgeLog 展示；Web 组件配置、javaScriptProxy、
+ * 桥接闭环保持不变。
  */
 @HMRouter({ pageUrl: RouterConstants.PAGE_WEB_RUNTIME })
 @ComponentV2
 export struct WebRuntimePage {
+  /** 原始 SDK 句柄：留给 Web 组件 / javaScriptProxy / WebBridgeChannel 使用 */
   private controller: webview.WebviewController = new webview.WebviewController();
   private bridge: WebBridgeChannel = new WebBridgeChannel(this.controller);
   private bridgeLog: BridgeLog = getBridgeLog();
@@ -29,8 +34,12 @@ export struct WebRuntimePage {
 
   /** Web 容器运行时状态（progress / title / loadState / errorMsg / guardMsg / currentUrl） */
   @Local state: WebRuntimeState = new WebRuntimeState();
+  /** Web 容器操作 Controller：所有「让 Web 做点什么」的入口（loadUrl/reload/goBack/runJavaScript/…） */
+  private runtime: WebRuntimeController = new WebRuntimeController(this.state);
 
   aboutToAppear(): void {
+    // 把同一个 controller 句柄注入给运行时 Controller（之后页面对 Web 的操作都走 this.runtime）
+    this.runtime.bindController(this.controller);
     // 把「弹真实 Toast」的能力绑给桥（用页面的 UIContext，在点按钮时才真正取）
     this.bridge.bindToast((msg: string) => {
       this.getUIContext().getPromptAction().showToast({ message: 'Toast: ' + msg, duration: 2000 });
@@ -161,7 +170,9 @@ export struct WebRuntimePage {
             this.state.title = event.title;
           }
         })
-        .onPageEnd(() => {
+        .onPageEnd((event) => {
+          // 重定向后真实落地 url 可能与 onPageBegin 不同，走 runtime 同步给 state
+          this.runtime.updateCurrentUrl(event.url);
           this.state.markSuccess();
         })
         .onErrorReceive((event) => {
