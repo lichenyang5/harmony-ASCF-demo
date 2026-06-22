@@ -5,13 +5,19 @@ import { webview } from '@kit.ArkWeb';
 
 /**
  * 注册给 H5 的桥接通道对象（window.ascfBridge）。
- * H5 调 send(jsonStr) → 解析 → 记请求 → 按 action 分发 → 记响应 → 回传 H5。
+ * H5 调 send(jsonStr) → 解析 → 校验 → 分发（registry 内部完成 trace 记录）→ 回传 H5。
  *
- * 健壮性（提交1）：非法 JSON / 缺 id / 缺 action 都**不静默失败**，
+ * 健壮性：非法 JSON / 缺 id / 缺 action 都**不静默失败**，
  * 而是回一条标准 BAD_REQUEST 响应并记入桥接日志，H5 侧能看到失败原因。
  *
  * 重入注意：send 是被 H5 同步调进来的（JS→ArkTS 在栈上）。回传用的 runJavaScript 是
  * 反方向（ArkTS→JS），若在 send 里直接调可能重入 JS 引擎；所以用 setTimeout(0) 推到下一拍。
+ *
+ * Trace 责任划分：
+ *   - 「能进 registry 的请求」由 NativeAbilityRegistry.dispatch 内部写 BridgeLog
+ *     （它天然拿得到 AbilityMeta、handler 耗时、handler 抛错的 stack）
+ *   - 「进不去 registry 的请求」（JSON 解析失败 / 缺 id / 缺 action）由 channel
+ *     用 replyError 直接写一条 unknown meta 的失败日志
  */
 export class WebBridgeChannel {
   private controller: webview.WebviewController;
@@ -29,7 +35,7 @@ export class WebBridgeChannel {
 
   /** 被 H5 调用：接收一条 BridgeRequest 的 JSON 文本 */
   send(jsonStr: string): void {
-    // 1) 解析：非法 JSON 不静默，回标准 BAD_REQUEST
+    // 1) 解析：非法 JSON 不静默，回标准 BAD_REQUEST（trace 由 channel 直接写）
     let parsed: BridgeRequest | null = null;
     try {
       parsed = JSON.parse(jsonStr) as BridgeRequest;
@@ -38,7 +44,7 @@ export class WebBridgeChannel {
       return;
     }
 
-    // 2) 基础校验：缺 id / action 回 BAD_REQUEST
+    // 2) 基础校验：缺 id / action 回 BAD_REQUEST（同上，trace 由 channel 直接写）
     if (parsed === null || !parsed.id || !parsed.action) {
       let badId: string = '';
       let badAction: string = 'unknown';
@@ -59,12 +65,11 @@ export class WebBridgeChannel {
       parsed.version = '1.0';
     }
 
-    // 4) 正常链路：记请求 → 分发 → 记响应 → 下一拍执行副作用并回传
+    // 4) 正常链路：交给 registry 分发；registry 内部已经把 trace 写进 BridgeLog
+    //    （命中 / 未知 / 禁用 / 抛错都会写）。channel 这里只负责把响应回传 H5。
     const req: BridgeRequest = parsed;
-    const entry = getBridgeLog().onRequest(req, jsonStr);
     const resp = this.dispatcher.dispatch(req);
     const respJson = JSON.stringify(resp);
-    getBridgeLog().onResponse(entry, resp, respJson);
 
     const toast = this.onToast;
     setTimeout(() => {
@@ -79,13 +84,17 @@ export class WebBridgeChannel {
     }, 0);
   }
 
-  /** 解析/校验失败也要回一条标准错误响应并记日志（不静默失败） */
+  /**
+   * 解析/校验失败也要回一条标准错误响应并记日志（不静默失败）。
+   * 这条路径不会走到 registry，所以 meta 维持 'unknown' 默认值。
+   */
   private replyError(id: string, action: string, code: number, message: string, rawJson: string): void {
     const pseudo: BridgeRequest = { version: '1.0', id: id, action: action };
-    const entry = getBridgeLog().onRequest(pseudo, rawJson);
+    const log = getBridgeLog();
+    const entry = log.onRequest(pseudo, rawJson);
     const resp: BridgeResponse = BridgeResponses.fail(id, code, message);
     const respJson = JSON.stringify(resp);
-    getBridgeLog().onResponse(entry, resp, respJson);
+    log.onResponse(entry, resp, respJson);
     setTimeout(() => {
       this.sendBack(respJson);
     }, 0);
