@@ -86,128 +86,135 @@
     <div class="loghead">完整链路日志（H5 侧）</div>
     <div id="log" class="log"><span class="empty">点上面的按钮试试……</span></div>
   </div>
-
+<!--  <button onclick="testUnknownAction()">测试 UNKNOWN_ACTION</button>-->
   <script>
-    // ---------- 小工具：日志 / 状态 / 结果 ----------
-    function log(s) {
-      var el = document.getElementById('log');
-      var t = new Date().toLocaleTimeString();
-      var prev = el.querySelector('.empty') ? '' : el.innerHTML;
-      el.innerHTML = '<div>[' + t + '] ' + s + '</div>' + prev;
-    }
-    function tail4(id) { return id ? String(id).slice(-4) : '????'; }
-    function setStatus(kind, text) {
-      var el = document.getElementById('status');
-      el.className = 'pill ' + kind;
-      el.textContent = text;
-    }
-    function showResult(resp) {
-      var el = document.getElementById('result');
-      var ok = resp && resp.code === 0;
-      var body = ok
-        ? JSON.stringify((resp && resp.data) || {}, null, 2)
-        : ('[' + (resp ? resp.code : '?') + '] ' + (resp ? resp.message : '无响应'));
-      el.innerHTML = '<pre>' + body + '</pre>';
-    }
+    function testUnknownAction() {
+  window.ascfBridge.send(JSON.stringify({
+    id: 't1',
+    version: '1.0',
+    action: 'foobar'
+  }))
+}
+  // ---------- 小工具：日志 / 状态 / 结果 ----------
+  function log(s) {
+    var el = document.getElementById('log');
+    var t = new Date().toLocaleTimeString();
+    var prev = el.querySelector('.empty') ? '' : el.innerHTML;
+    el.innerHTML = '<div>[' + t + '] ' + s + '</div>' + prev;
+  }
+  function tail4(id) { return id ? String(id).slice(-4) : '????'; }
+  function setStatus(kind, text) {
+    var el = document.getElementById('status');
+    el.className = 'pill ' + kind;
+    el.textContent = text;
+  }
+  function showResult(resp) {
+    var el = document.getElementById('result');
+    var ok = resp && resp.code === 0;
+    var body = ok
+      ? JSON.stringify((resp && resp.data) || {}, null, 2)
+      : ('[' + (resp ? resp.code : '?') + '] ' + (resp ? resp.message : '无响应'));
+    el.innerHTML = '<pre>' + body + '</pre>';
+  }
 
-    // ---------- ascf 桥 SDK：requestId + callback 管理 + timeout ----------
-    // 为什么要这层：H5 → ArkTS 是「发出去就返回」的，响应是 ArkTS 之后通过
-    // runJavaScript 异步回调的。必须用 requestId 把「哪次响应配哪次调用」对上，
-    // 再加 timeout 防止 ArkTS 不回导致 callback 永远挂着。
-    var ascf = (function () {
-      var pending = {};        // id -> { resolve, reject, timer, action }
-      var seq = 0;
-      var VERSION = '1.0';
-      var DEFAULT_TIMEOUT = 5000;
+  // ---------- ascf 桥 SDK：requestId + callback 管理 + timeout ----------
+  // 为什么要这层：H5 → ArkTS 是「发出去就返回」的，响应是 ArkTS 之后通过
+  // runJavaScript 异步回调的。必须用 requestId 把「哪次响应配哪次调用」对上，
+  // 再加 timeout 防止 ArkTS 不回导致 callback 永远挂着。
+  var ascf = (function () {
+    var pending = {};        // id -> { resolve, reject, timer, action }
+    var seq = 0;
+    var VERSION = '1.0';
+    var DEFAULT_TIMEOUT = 5000;
 
-      function genId() { seq++; return 'req_' + Date.now() + '_' + seq; }
+    function genId() { seq++; return 'req_' + Date.now() + '_' + seq; }
 
-      function call(action, params, options) {
-        options = options || {};
-        var timeout = options.timeout || DEFAULT_TIMEOUT;
-        var id = genId();
-        return new Promise(function (resolve, reject) {
-          if (!(window.ascfBridge && window.ascfBridge.send)) {
-            reject({ id: id, code: -1, message: 'ascfBridge 未注入（请在鸿蒙容器里打开本页）' });
-            return;
+    function call(action, params, options) {
+      options = options || {};
+      var timeout = options.timeout || DEFAULT_TIMEOUT;
+      var id = genId();
+      return new Promise(function (resolve, reject) {
+        if (!(window.ascfBridge && window.ascfBridge.send)) {
+          reject({ id: id, code: -1, message: 'ascfBridge 未注入（请在鸿蒙容器里打开本页）' });
+          return;
+        }
+        // 超时：到点还没回，就清掉 pending 并按 408 拒绝
+        var timer = setTimeout(function () {
+          if (pending[id]) {
+            delete pending[id];
+            reject({ id: id, code: 408, message: '调用超时（' + timeout + 'ms）' });
           }
-          // 超时：到点还没回，就清掉 pending 并按 408 拒绝
-          var timer = setTimeout(function () {
-            if (pending[id]) {
-              delete pending[id];
-              reject({ id: id, code: 408, message: '调用超时（' + timeout + 'ms）' });
-            }
-          }, timeout);
-          pending[id] = { resolve: resolve, reject: reject, timer: timer, action: action };
+        }, timeout);
+        pending[id] = { resolve: resolve, reject: reject, timer: timer, action: action };
 
-          var req = { version: VERSION, id: id, action: action, params: params || {}, timeout: timeout };
-          window.ascfBridge.send(JSON.stringify(req));
-        });
-      }
-
-      // ArkTS 通过 runJavaScript 调 window.__ascfOnResponse → 这里按 id 找回回调
-      function onResponse(jsonStr) {
-        var resp;
-        try {
-          resp = JSON.parse(jsonStr);
-        } catch (e) {
-          log('④ H5 收到非法响应（JSON 解析失败）');
-          return;
-        }
-        var p = pending[resp.id];
-        if (!p) {
-          // 找不到对应 callback：可能已超时被清理，或响应 id 为空（如非法请求兜底）
-          log('⚠ 收到无匹配 callback 的响应 · id …' + tail4(resp.id) + '（可能已超时）');
-          return;
-        }
-        clearTimeout(p.timer);
-        delete pending[resp.id];
-        if (resp.code === 0) {
-          p.resolve(resp);
-        } else {
-          p.reject(resp);
-        }
-      }
-
-      return { call: call, _onResponse: onResponse };
-    })();
-
-    // ArkTS 回传入口（保持与 WebBridgeChannel.sendBack 约定的函数名一致）
-    window.__ascfOnResponse = function (jsonStr) { ascf._onResponse(jsonStr); };
-
-    // ---------- 统一发起 + 渲染成功 / 失败 / 超时 ----------
-    function run(action, params, options) {
-      setStatus('run', '调用中…');
-      log('① H5 发出 <b>' + action + '</b>');
-      ascf.call(action, params, options).then(function (resp) {
-        log('④ H5 收到结果 · id …' + tail4(resp.id) + ' · 成功');
-        setStatus('ok', '成功');
-        showResult(resp);
-      }).catch(function (resp) {
-        var isTimeout = resp && resp.code === 408;
-        log('④ H5 调用失败 · id …' + tail4(resp && resp.id) + ' · ['
-          + (resp ? resp.code : '?') + '] ' + (resp ? resp.message : '未知错误'));
-        setStatus('err', isTimeout ? '超时' : '失败');
-        showResult(resp);
+        var req = { version: VERSION, id: id, action: action, params: params || {}, timeout: timeout };
+        window.ascfBridge.send(JSON.stringify(req));
       });
     }
 
-    // ---------- 各按钮 ----------
-    function callDeviceInfo() { run('getDeviceInfo'); }
-    function callCurrentTime() { run('getCurrentTime'); }
-    function callToast() { run('openToast', { message: 'Hello from H5 👋' }); }
-    function callLocation() { run('getLocation'); }
-    function callGetClip() { run('getClipboardData'); }
-    function callSetClip() {
-      var t = document.getElementById('clipText').value || '';
-      run('setClipboardData', { text: t });
+    // ArkTS 通过 runJavaScript 调 window.__ascfOnResponse → 这里按 id 找回回调
+    function onResponse(jsonStr) {
+      var resp;
+      try {
+        resp = JSON.parse(jsonStr);
+      } catch (e) {
+        log('④ H5 收到非法响应（JSON 解析失败）');
+        return;
+      }
+      var p = pending[resp.id];
+      if (!p) {
+        // 找不到对应 callback：可能已超时被清理，或响应 id 为空（如非法请求兜底）
+        log('⚠ 收到无匹配 callback 的响应 · id …' + tail4(resp.id) + '（可能已超时）');
+        return;
+      }
+      clearTimeout(p.timer);
+      delete pending[resp.id];
+      if (resp.code === 0) {
+        p.resolve(resp);
+      } else {
+        p.reject(resp);
+      }
     }
-    function callUnknown() { run('noSuchAction'); }
 
-    function tryExternal() {
-      log('① H5 尝试跳转 https://example.com（应被容器白名单拦截）');
-      window.location.href = 'https://example.com/should-be-blocked';
-    }
+    return { call: call, _onResponse: onResponse };
+  })();
+
+  // ArkTS 回传入口（保持与 WebBridgeChannel.sendBack 约定的函数名一致）
+  window.__ascfOnResponse = function (jsonStr) { ascf._onResponse(jsonStr); };
+
+  // ---------- 统一发起 + 渲染成功 / 失败 / 超时 ----------
+  function run(action, params, options) {
+    setStatus('run', '调用中…');
+    log('① H5 发出 <b>' + action + '</b>');
+    ascf.call(action, params, options).then(function (resp) {
+      log('④ H5 收到结果 · id …' + tail4(resp.id) + ' · 成功');
+      setStatus('ok', '成功');
+      showResult(resp);
+    }).catch(function (resp) {
+      var isTimeout = resp && resp.code === 408;
+      log('④ H5 调用失败 · id …' + tail4(resp && resp.id) + ' · ['
+        + (resp ? resp.code : '?') + '] ' + (resp ? resp.message : '未知错误'));
+      setStatus('err', isTimeout ? '超时' : '失败');
+      showResult(resp);
+    });
+  }
+
+  // ---------- 各按钮 ----------
+  function callDeviceInfo() { run('getDeviceInfo'); }
+  function callCurrentTime() { run('getCurrentTime'); }
+  function callToast() { run('openToast', { message: 'Hello from H5 👋' }); }
+  function callLocation() { run('getLocation'); }
+  function callGetClip() { run('getClipboardData'); }
+  function callSetClip() {
+    var t = document.getElementById('clipText').value || '';
+    run('setClipboardData', { text: t });
+  }
+  function callUnknown() { run('noSuchAction'); }
+
+  function tryExternal() {
+    log('① H5 尝试跳转 https://example.com（应被容器白名单拦截）');
+    window.location.href = 'https://example.com/should-be-blocked';
+  }
   </script>
 </body>
 </html>
