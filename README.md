@@ -1,5 +1,4 @@
 # harmony-ASCF-demo
-
 > 一个用于学习 HarmonyOS **ASCF / 元服务 / Web 容器 / JSBridge** 的 Demo 工程。
 
 ## 项目简介
@@ -53,6 +52,9 @@ MyApplication2/
 ├── library/                    # HSP 动态共享库：动态 import 目标
 └── docs/                       # 学习文档（8 篇）
 ```
+
+## ASCF 主链路架构图
+![harmony-ASCF-demo 架构图](./docs/assets/ASCF架构图.png)
 
 ## 演示路径（3 分钟路线）
 
